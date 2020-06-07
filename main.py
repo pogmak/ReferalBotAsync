@@ -75,39 +75,35 @@ class ReplyKeyboardMarkup(ReplyKeyboardMarkup):
         super().__init__(keyboard=keyboard, resize_keyboard=resize_keyboard,
                          one_time_keyboard=one_time_keyboard, selective=selective, row_width=row_width)
 
-    @classmethod
-    def from_button(cls, button, resize_keyboard=True, one_time_keyboard=False, selective=False,
-                    row_width=3, **kwargs):
-        if kwargs.get('update'):
-            button = _(button, kwargs['update'])
-        return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=button)]], resize_keyboard=resize_keyboard,
-                                   one_time_keyboard=one_time_keyboard, selective=selective, row_width=row_width)
 
-    @classmethod
-    def from_column(cls, button_column, resize_keyboard=True, one_time_keyboard=False, selective=False, row_width=3,
-                    **kwargs):
-        if kwargs.get('chat_id'):
-            button_column = [_(x, kwargs['chat_id']) for x in button_column]
-        column = [[KeyboardButton(text=button)] for button in button_column]
-        return ReplyKeyboardMarkup(keyboard=column, resize_keyboard=resize_keyboard, one_time_keyboard=one_time_keyboard,
-                                   selective=selective, row_width=row_width)
+class KeyboardButton(KeyboardButton):
+    """Переопределяю для перевода текста кнопки"""
+    def __init__(self, text, chat_id=None,
+                 request_contact=None,
+                 request_location=None,
+                 request_poll=None):
+        text = _(text, chat_id)
+        super().__init__(text=text, request_contact=request_contact,
+                         request_location=request_location, request_poll=request_poll)
+
 
 class InlineKeyboardButton(InlineKeyboardButton):
-
+    """Переопределяю инициализацию, чтобы перевести текст кнопки"""
     def __init__(self,
                  text,
-                 chat_id,
+                 chat_id=None,
                  url=None,
                  callback_data=None,
                  switch_inline_query=None,
                  switch_inline_query_current_chat=None,
                  callback_game=None,
                  pay=None,
-                 login_url=None):
+                 login_url=None,
+                 **kwargs):
         text = _(text, chat_id)
         super().__init__(text=text, url=url, callback_data=callback_data, switch_inline_query=switch_inline_query,
                          switch_inline_query_current_chat=switch_inline_query_current_chat, callback_game=callback_game,
-                         pay=pay, login_url=login_url)
+                         pay=pay, login_url=login_url, **kwargs)
 
 
 def _(text, chat_id, reverse=None):
@@ -149,16 +145,16 @@ async def start(message=types.Message):
                 users[chat_id]['Inviter'] = inviter
                 text = f"{_('Пользователь', chat_id)} {username} {_('перешёл по вашей ссылке!', chat_id)}"
                 await bot.send_message(chat_id=inviter, text=text)
-        menu = ReplyKeyboardMarkup.from_column(button_column=buttons_lang)
+        menu = ReplyKeyboardMarkup([[KeyboardButton(button)] for button in buttons_lang])
         await bot.send_message(chat_id=chat_id, text="Выберите язык", reply_markup=menu)
     else:
         menu = ReplyKeyboardMarkup(await generateLayout(chat_id))
         await bot.send_message(chat_id=chat_id,text=start_message, reply_markup=menu)
         if users[chat_id].get('Language') == 'EN':
-            button = InlineKeyboardButton(text="Join", chat_id=chat_id, url="https://t.me/SectorTokenEng")
+            button = InlineKeyboardButton(text="Join", url="https://t.me/SectorTokenEng")
         else:
-            button = InlineKeyboardButton(text="Вступить", chat_id=chat_id, url="https://t.me/SectorTokenRussian")
-        markup = InlineKeyboardMarkup().insert(button)
+            button = InlineKeyboardButton(text="Вступить", url="https://t.me/SectorTokenRussian")
+        markup = InlineKeyboardMarkup(inline_keyboard=[[button]])
         await bot.send_message(chat_id=chat_id, text=_(":speech_balloon:Вступай в наш чат:", chat_id), reply_markup=markup)
 
 async def sendReflink(chat_id):
@@ -215,7 +211,7 @@ async def textHandler(message=types.Message):
             balance_info = _("В данный момент, отсутствуют валюты для вывода средств", chat_id)
             layout.__delitem__(0)
         inline_markup = InlineKeyboardMarkup(inline_keyboard=inline_markup)
-        markup = ReplyKeyboardMarkup.from_column(button_column=layout, chat_id=chat_id)
+        markup = ReplyKeyboardMarkup([[KeyboardButton(but,chat_id=chat_id)] for but in layout])
         await bot.send_message(chat_id=chat_id, text=balance_info, reply_markup=inline_markup)
         await bot.send_message(chat_id=chat_id, text=choice_text, reply_markup=markup)
     # Кнопка вывода средств
@@ -242,7 +238,7 @@ async def textHandler(message=types.Message):
     # Кнопка просмотра личной статистики
     elif text == menu_buttons_ru[4]:
         referal_statistic_message = f"{_('Количество ваших рефералов', chat_id=chat_id)} {users[chat_id]['Referrals']}\n" \
-                                    f"{_('Вот их список:', chat_id=chat_id)}\n{getRefers(chat_id)}"
+                                    f"{_('Вот их список:', chat_id=chat_id)}\n{await getRefers(chat_id)}"
         await bot.send_message(chat_id=chat_id, text=referal_statistic_message, parse_mode='HTML')
     # Кнопка "О боте"
     elif text == menu_buttons_ru[7]:
@@ -350,15 +346,17 @@ async def textHandler(message=types.Message):
                     callback = f"{param} {currency}"
                     layout[index].append(InlineKeyboardButton(text=f"{value}",callback_data=callback))
             layout.append([InlineKeyboardButton(text="Добавить",callback_data="Append currency")])
-            await bot.send_message(chat_id=chat_id,text=current_currencies, reply_markup=InlineKeyboardMarkup(layout))
+            markup = InlineKeyboardMarkup(inline_keyboard=layout)
+            await bot.send_message(chat_id=chat_id,text=current_currencies, reply_markup=markup)
 
         elif text == buttons_in_settings[3]:
-            markup = getAllowedChats()
+            markup = await getAllowedChats()
             await bot.send_message(chat_id=chat_id, text="Для удаления чата нажмите на него", reply_markup=markup)
-
+        # Кнопка "Изменить о боте"
         elif text == buttons_in_settings[4]:
             admins[chat_id]['mode_edit_about'] = True
-            markup = InlineKeyboardMarkup([[InlineKeyboardButton(menu_buttons_ru[5], callback_data="CancelOperation")]])
+            button = [[InlineKeyboardButton(menu_buttons_ru[5], callback_data="CancelOperation")]]
+            markup = InlineKeyboardMarkup(inline_keyboard=button)
             await bot.send_message(chat_id=chat_id, text="Введите текст", reply_markup=markup)
 
         elif text == buttons_in_settings[5]:
@@ -407,7 +405,7 @@ async def textHandler(message=types.Message):
         elif admins[chat_id].get('mode_append_chat') == 1:
             admins[chat_id]['mode_append_chat'] = 0
             allowed_chats.append(text)
-            markup = getAllowedChats()
+            markup = await getAllowedChats()
             await bot.send_message(chat_id=chat_id,text=f"Чат {text} успешно добавлен", reply_markup=markup)
 
 async def getAllowedChats():
@@ -429,7 +427,7 @@ async def getBalanceInfo(chat_id, currency):
     """Считает и возвращает данные по балансу"""
     already_payed = currencies[currency]['Referrals'] * users[chat_id]['Payed']
     already_payed = floatHumanize(already_payed)
-    balance = getBalance(chat_id, currency) - float(already_payed)
+    balance = await getBalance(chat_id, currency) - float(already_payed)
     balance = floatHumanize(balance)
     start_bonus = currencies[currency]['Bonus']
     start_bonus = floatHumanize(start_bonus)
@@ -510,12 +508,12 @@ async def generateLayout(chat_id):
         layout = [[KeyboardButton(text=menu_buttons_ru[2])],
                   [KeyboardButton(text=menu_buttons_ru[3])]]
     else:
-        layout = [[KeyboardButton(text=menu_buttons_ru[0]),
-                   KeyboardButton(text=menu_buttons_ru[4])],
-                  [KeyboardButton(text=menu_buttons_ru[1]),
-                   KeyboardButton(text=menu_buttons_ru[7])],
-                  [KeyboardButton(text=menu_buttons_ru[8]),
-                   KeyboardButton(text=menu_buttons_ru[9])]]
+        layout = [[KeyboardButton(text=menu_buttons_ru[0], chat_id=chat_id),
+                   KeyboardButton(text=menu_buttons_ru[4], chat_id=chat_id)],
+                  [KeyboardButton(text=menu_buttons_ru[1], chat_id=chat_id),
+                   KeyboardButton(text=menu_buttons_ru[7], chat_id=chat_id)],
+                  [KeyboardButton(text=menu_buttons_ru[8], chat_id=chat_id),
+                   KeyboardButton(text=menu_buttons_ru[9], chat_id=chat_id)]]
     return layout
 
 @dp.callback_query_handler(lambda query: True)
@@ -559,8 +557,11 @@ async def callbackHandler(query=types.CallbackQuery):
                 inline_markup.append(InlineKeyboardButton(text=currency, callback_data=f"Balance {currency}"))
         if not inline_markup:
             inline_markup.append(InlineKeyboardButton(text=_("Нет валют", chat_id), callback_data='None'))
-        inline_markup = InlineKeyboardMarkup([inline_markup])
-        await query.message.edit_reply_markup(reply_markup=inline_markup)
+        inline_markup = InlineKeyboardMarkup(inline_keyboard=[inline_markup])
+        try:
+            await query.message.edit_reply_markup(reply_markup=inline_markup)
+        except:
+            pass
 
     # Button "Payed"
     elif "Payed" in data:
