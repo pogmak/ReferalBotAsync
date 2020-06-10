@@ -3,6 +3,7 @@ from aiogram.types import InlineKeyboardMarkup, ContentTypes
 from aiogram.types import InlineKeyboardButton, ReplyKeyboardMarkup, CallbackQuery, KeyboardButton
 from aiogram.utils.deep_linking import get_start_link, decode_payload
 from aiogram.utils.exceptions import TelegramAPIError
+from aiogram.types.chat import ChatType
 import asyncio
 import aiohttp
 import logging
@@ -125,7 +126,9 @@ def floatHumanize(str):
     return '{:.10f}'.format(str).rstrip('0').rstrip('.') if str else 0
 
 
-@dp.message_handler(commands='start')
+
+
+@dp.message_handler(lambda message: ChatType.is_private(message), commands='start')
 async def start(message=types.Message):
     """Команда /start"""
     global users
@@ -138,7 +141,7 @@ async def start(message=types.Message):
 
     if chat_id not in users:
         users[chat_id] = {'Username': username, 'Referrals': 0, 'Messages': 0, 'Inviter': 0,
-                               'Language': 'Unknown', 'Payed': 0, 'pay_request_mode': 0}
+                               'Language': 'RU', 'Payed': 0, 'pay_request_mode': 0}
         if len(message.text.split()) == 2:
             inviter = int(decode_payload(message.text.split()[1]))
             if inviter in users and inviter != chat_id:
@@ -157,6 +160,30 @@ async def start(message=types.Message):
         markup = InlineKeyboardMarkup(inline_keyboard=[[button]])
         await bot.send_message(chat_id=chat_id, text=_(":speech_balloon:Вступай в наш чат:", chat_id), reply_markup=markup)
 
+content_types = ContentTypes.NEW_CHAT_MEMBERS | ContentTypes.LEFT_CHAT_MEMBER
+@dp.message_handler(lambda message: ChatType.is_group_or_super_group(message), content_types=content_types)
+async def join_or_left_Group(message=types.Message):
+    print(message)
+    chatmessage_name = message.chat.username
+    if chatmessage_name in allowed_chats:
+        new_members = message.new_chat_members
+        left_member = message.left_chat_member
+        for member in new_members:
+            userid = member.id
+            if userid in users:
+                if not await getStatusInChats(userid=userid, chats=[x for x in allowed_chats if x != chatmessage_name]):
+                    inviter = users[userid]['Inviter']
+                    if inviter != 0:
+                        users[inviter]['Referrals'] += 1
+        if left_member:
+            userid = left_member.id
+            if userid in users:
+                if not await getStatusInChats(userid=userid, chats=allowed_chats):
+                    inviter = users[userid]['Inviter']
+                    if inviter != 0:
+                        users[inviter]['Referrals'] -= 1
+
+
 async def sendReflink(chat_id):
     """Создаёт deep link и отсылает пользователю"""
     deep_link = await get_start_link(str(chat_id), encode=True)
@@ -167,6 +194,7 @@ async def getRefers(chat_id):
     refers = ""
     for user in users:
         if users[user]['Inviter'] == chat_id:
+            users[chat_id]['Referrals'] = 0
             username = users[user]['Username']
             if username == "None" or not username:
                 username = _("Без имени", chat_id)
@@ -174,17 +202,25 @@ async def getRefers(chat_id):
             if not status:
                 refers += f"<s>{username}</s>"
             else:
+                users[chat_id]['Referrals'] += 1
                 refers += username
             refers += "\n"
     if refers:
         return refers
     else:
         return _("Нет рефералов", chat_id)
-@dp.message_handler()
+
+
+@dp.message_handler(lambda message: not message.is_command() and ChatType.is_private(message))
 async def textHandler(message=types.Message):
     """Обработчик сообщений посылаемых кнопками"""
     global users, admins, start_message, currencies, pay_requests, allowed_chats, banlist, about
     chat_id = message.from_user.id
+
+    if not users.get(chat_id):
+        await start(message)
+        return 0
+
     username = message.from_user.username
     buttons_in_settings = ["Администраторы", "Изменить приветствие",
                            "Настроить валюты", "Настройка чатов", "Изменить 'О боте'", "БАН"]
@@ -237,8 +273,9 @@ async def textHandler(message=types.Message):
         await start(message)
     # Кнопка просмотра личной статистики
     elif text == menu_buttons_ru[4]:
+        ref_list = await getRefers(chat_id)
         referal_statistic_message = f"{_('Количество ваших рефералов', chat_id=chat_id)} {users[chat_id]['Referrals']}\n" \
-                                    f"{_('Вот их список:', chat_id=chat_id)}\n{await getRefers(chat_id)}"
+                                    f"{_('Вот их список:', chat_id=chat_id)}\n{ref_list}"
         await bot.send_message(chat_id=chat_id, text=referal_statistic_message, parse_mode='HTML')
     # Кнопка "О боте"
     elif text == menu_buttons_ru[7]:
@@ -520,6 +557,11 @@ async def generateLayout(chat_id):
 async def callbackHandler(query=types.CallbackQuery):
     global users, admins, start_message, currencies, pay_requests, allowed_chats, banlist, about
     chat_id = query.from_user.id
+
+    if not users.get(chat_id):
+        await query.answer("Please type /start", show_alert=True)
+        return 0
+
     username = users[chat_id]['Username']
     data = query.data
     if data == "Append currency":
@@ -723,7 +765,8 @@ def loadfromDB():
             if row[6] == 1:
                 admins[chat_id] = {'mode_append': False, 'change_welcome': False}
 
-@dp.message_handler(content_types=ContentTypes.TEXT)
+
+@dp.message_handler(lambda message: ChatType.is_group_or_super_group(message), content_types=ContentTypes.TEXT)
 async def messageGroup(message=types.Message):
     """Обработчик текстовых сообщений в чате"""
     if not message:
@@ -736,41 +779,21 @@ async def messageGroup(message=types.Message):
         except KeyError:
             pass
 
-def getStatusInChats(userid, chats):
+async def getStatusInChats(userid, chats):
     for chat in chats:
         try:
-            status = bot.get_chat_member(user_id=userid, chat_id=f"@{chat}").status
-        except TelegramAPIError:
+            status = (await bot.get_chat_member(user_id=userid, chat_id=f"@{chat}")).status
+        except:
             status = 'Not found'
         finally:
-            if status in ['creator', 'administrator', 'member']:
+            if status in ['creator', 'administrator', 'member', 'restricted']:
                 return True
     return False
 
-@dp.message_handler(content_types=ContentTypes.NEW_CHAT_MEMBERS | ContentTypes.LEFT_CHAT_MEMBER)
-def join_or_left_Group(message=types.Message):
-    chatmessage_name = message.chat.username
-    if chatmessage_name in allowed_chats:
-        new_members = message.new_chat_members
-        left_member = message.left_chat_member
-        for member in new_members:
-            userid = member.id
-            if userid in users:
-                if not getStatusInChats(userid=userid, chats=[x for x in allowed_chats if x != chatmessage_name]):
-                    inviter = users[userid]['Inviter']
-                    if inviter != 0:
-                        users[inviter]['Referrals'] += 1
-        if left_member:
-            userid = left_member.id
-            if userid in users:
-                if not getStatusInChats(userid=userid, chats=allowed_chats):
-                    inviter = users[userid]['Inviter']
-                    if inviter != 0:
-                        users[inviter]['Referrals'] -= 1
 
-
-@dp.message_handler(commands='unban')
+@dp.message_handler(lambda message: ChatType.is_private(message), commands='unban')
 async def unban(message=types.Message):
+    print(message.get_args())
     global banlist
     chat_id = message.from_user.id
     if chat_id in admins:
@@ -784,7 +807,7 @@ async def unban(message=types.Message):
 if __name__ == "__main__":
     loadfromDB()
 
-    logger.info("Start!")
+    logger.info("Starting....")
 
     executor.start_polling(dp)
 
