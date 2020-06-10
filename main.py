@@ -191,9 +191,9 @@ async def sendReflink(chat_id):
 async def getRefers(chat_id):
     """Возвращает строку рефералов пользователя"""
     refers = ""
+    users[chat_id]['Referrals'] = 0
     for user in users:
         if users[user]['Inviter'] == chat_id:
-            users[chat_id]['Referrals'] = 0
             username = users[user]['Username']
             if username == "None" or not username:
                 username = _("Без имени", chat_id)
