@@ -163,7 +163,6 @@ async def start(message=types.Message):
 content_types = ContentTypes.NEW_CHAT_MEMBERS | ContentTypes.LEFT_CHAT_MEMBER
 @dp.message_handler(lambda message: ChatType.is_group_or_super_group(message), content_types=content_types)
 async def join_or_left_Group(message=types.Message):
-    print(message)
     chatmessage_name = message.chat.username
     if chatmessage_name in allowed_chats:
         new_members = message.new_chat_members
@@ -416,7 +415,7 @@ async def textHandler(message=types.Message):
             admins[chat_id]['mode_edit_about'] = False
 
         elif admins[chat_id]['mode_append']:
-            addtoAdmin(chat_id, text)
+            await addtoAdmin(chat_id, text)
             admins[chat_id]['mode_append'] = False
 
         # Меняет приветствие на присланный текст
@@ -793,7 +792,6 @@ async def getStatusInChats(userid, chats):
 
 @dp.message_handler(lambda message: ChatType.is_private(message), commands='unban')
 async def unban(message=types.Message):
-    print(message.get_args())
     global banlist
     chat_id = message.from_user.id
     if chat_id in admins:
